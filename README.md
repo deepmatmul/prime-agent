@@ -77,6 +77,28 @@ prime-agent update [--force]         # Update Prime Agent
 prime-agent shutdown [--force]       # Stop every agent, worker, and background service
 ```
 
+## Experimental Cloud Harness
+
+This fork can keep the Prime TUI local while the managed-agent brain, Temporal
+workflow, shared filesystem, and isolated execution sandboxes run remotely:
+
+```bash
+npm ci
+cd packages/coding-agent
+npx tsx src/cli.ts cloud --new "Inspect the repository and make a verified plan."
+```
+
+`prime-agent cloud` defaults to `gpt-5.6-luna` with low reasoning for inexpensive
+MVP testing. It first tries `http://127.0.0.1:18080`; when that endpoint is not
+already available, it opens a `kubectl port-forward` to
+`service/cloud-agent-api` in the `cloud-agent-mvp` namespace. Use `--fleet` and
+`--agent` to reattach to a durable session, or `--new` for a fresh fleet.
+
+The client opens the live event stream before fetching persisted items, then
+reconciles by item id after reconnects. Exiting the UI only closes the local
+connection and tunnel. The Temporal workflow, managed session, EKS sandbox,
+Archil workspace, and child agents continue running remotely.
+
 ## Built for Long-Running Work
 Prime Agent is built for long-running work, especially for evaluations in research. These features are available in the TUI, and when run autonomously. 
 

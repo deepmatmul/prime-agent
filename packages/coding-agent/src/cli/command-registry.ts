@@ -21,6 +21,21 @@ export const COMMAND_SPECS: readonly CommandSpec[] = [
 		summary: "Search and open sessions",
 	},
 	{
+		path: ["cloud"],
+		usage: "cloud [options] [initial prompt]",
+		summary: "Open the local UI on a durable cloud agent",
+		description: "Attaches to the cloud harness through a local URL or an automatically managed EKS port-forward.",
+		options: [
+			"--fleet <id>       Select a durable fleet",
+			"--agent <id>       Select an agent (default: lead)",
+			"--new              Start a uniquely named fleet",
+			"--attach           Require an existing agent",
+			"--model <id>       Select the managed model",
+			"--effort <level>   Select reasoning effort",
+			"--url <url>        Set the cloud harness URL",
+		],
+	},
+	{
 		path: ["list"],
 		usage: "list [--all] [--json]",
 		summary: "List agents",

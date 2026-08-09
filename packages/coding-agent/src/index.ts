@@ -281,6 +281,9 @@ export {
 	type AgentConnectionSessionEvent,
 	type AgentConnectionSlashCommand,
 	type AgentConnectionState,
+	CloudAgentClient,
+	CloudAgentConnection,
+	CloudAgentHttpError,
 	DaemonAgentConnection,
 	InProcessAgentConnection,
 } from "./modes/agent-connection/index.js";

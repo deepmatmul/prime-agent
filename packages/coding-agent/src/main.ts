@@ -33,6 +33,7 @@ import {
 	SessionSelectorError,
 	SessionSelectorNotFoundError,
 } from "./cli/session-resolver.js";
+import { runCloudCommand } from "./cloud-command.js";
 import { APP_NAME, expandTildePath, getAgentDir, getSessionDirEnvOverride, VERSION } from "./config.js";
 import {
 	type AgentExecutionMode,
@@ -1042,6 +1043,10 @@ export async function main(args: string[], options?: MainOptions) {
 	}
 	// Client and daemon are separate processes; both need these in their registry.
 	registerBuiltinMcpOAuthProviders();
+	if (args[0] === "cloud") {
+		await runCloudCommand(args.slice(1));
+		return;
+	}
 	const offlineMode = args.includes("--offline") || isTruthyEnvFlag(process.env.PI_OFFLINE);
 	if (offlineMode) {
 		process.env.PI_OFFLINE = "1";

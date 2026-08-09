@@ -1,3 +1,5 @@
+export { CloudAgentClient, CloudAgentHttpError } from "./cloud-agent-client.js";
+export { CloudAgentConnection } from "./cloud-agent-connection.js";
 export { DaemonAgentConnection } from "./daemon-agent-connection.js";
 export { InProcessAgentConnection } from "./in-process-agent-connection.js";
 export { createAgentConnectionCommands, createAgentConnectionState } from "./snapshot.js";
