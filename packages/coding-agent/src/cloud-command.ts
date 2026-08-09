@@ -14,7 +14,7 @@ import { initTheme, preloadCodeHighlighter, stopThemeWatcher } from "./modes/int
 const DEFAULT_CLOUD_URL = "http://127.0.0.1:18080";
 const DEFAULT_NAMESPACE = "cloud-agent-mvp";
 const DEFAULT_SERVICE = "cloud-agent-api";
-const DEFAULT_REMOTE_PORT = 8080;
+const DEFAULT_SERVICE_PORT = 80;
 const IDENTIFIER = /^[a-z0-9](?:[a-z0-9._-]{0,62}[a-z0-9])?$/;
 const REASONING_EFFORTS = new Set(["none", "minimal", "low", "medium", "high", "xhigh", "max"]);
 
@@ -213,14 +213,7 @@ function startPortForward(options: {
 	service: string;
 	localPort: number;
 }): Promise<ChildProcessWithoutNullStreams> {
-	const args = [
-		...(options.context ? ["--context", options.context] : []),
-		"--namespace",
-		options.namespace,
-		"port-forward",
-		`service/${options.service}`,
-		`${options.localPort}:${DEFAULT_REMOTE_PORT}`,
-	];
+	const args = cloudPortForwardArgs(options);
 	const process = spawn("kubectl", args, { stdio: "pipe" });
 	return new Promise((resolve, reject) => {
 		let settled = false;
@@ -251,6 +244,22 @@ function startPortForward(options: {
 			if (chunk.includes("Forwarding from")) finish();
 		});
 	});
+}
+
+export function cloudPortForwardArgs(options: {
+	context?: string;
+	namespace: string;
+	service: string;
+	localPort: number;
+}): string[] {
+	return [
+		...(options.context ? ["--context", options.context] : []),
+		"--namespace",
+		options.namespace,
+		"port-forward",
+		`service/${options.service}`,
+		`${options.localPort}:${DEFAULT_SERVICE_PORT}`,
+	];
 }
 
 function validateOptions(options: CloudCommandOptions): void {

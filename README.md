@@ -99,6 +99,11 @@ reconciles by item id after reconnects. Exiting the UI only closes the local
 connection and tunnel. The Temporal workflow, managed session, EKS sandbox,
 Archil workspace, and child agents continue running remotely.
 
+When a provider-side turn failure leaves a managed session unusable, sending a
+new message rolls the same durable workflow onto a replacement session. Prime
+hydrates the archived and current transcript generations together; the failed
+message itself is not replayed automatically.
+
 ## Built for Long-Running Work
 Prime Agent is built for long-running work, especially for evaluations in research. These features are available in the TUI, and when run autonomously. 
 

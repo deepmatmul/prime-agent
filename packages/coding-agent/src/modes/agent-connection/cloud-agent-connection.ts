@@ -943,7 +943,7 @@ export class CloudAgentConnection implements AgentConnection {
 			thinkingLevel: toThinkingLevel(this.snapshot.reasoningEffort),
 			serviceTier: null,
 			availableThinkingLevels: ["off", "low", "medium", "high", "xhigh", "max"],
-			isStreaming: this.turnActive || this.snapshot.status === "running",
+			isStreaming: this.turnActive || ["running", "recovering", "provisioning"].includes(this.snapshot.status),
 			isCompacting: false,
 			isBashRunning: false,
 			retryAttempt: 0,
@@ -1134,7 +1134,8 @@ function childSnapshot(snapshot: CloudAgentSnapshotDto): AgentConnectionRlmChild
 function cloudRecap(snapshot: CloudAgentSnapshotDto): string {
 	const location = snapshot.podName ? ` · ${snapshot.podName}` : "";
 	const pending = snapshot.pendingMessages > 0 ? ` · ${snapshot.pendingMessages} queued` : "";
-	return `cloud ${snapshot.status}${pending}${location}`;
+	const generation = snapshot.sessionGeneration > 1 ? ` · generation ${snapshot.sessionGeneration}` : "";
+	return `cloud ${snapshot.status}${generation}${pending}${location}`;
 }
 
 function toolName(itemType: string, item: Record<string, unknown>): string {
@@ -1184,7 +1185,12 @@ function eventRecord(record: Record<string, unknown>, key: string): Record<strin
 
 function eventError(record: Record<string, unknown>): string {
 	const error = eventRecord(record, "error");
-	return (error && eventString(error, "message")) ?? eventString(record, "error") ?? "Cloud agent turn failed";
+	const code = error && eventString(error, "code");
+	const message = (error && eventString(error, "message")) ?? eventString(record, "error") ?? "turn failed";
+	if (code === "internal_error") {
+		return `OpenAI managed turn failed (${code}): ${message} Send a new message to recover into a fresh managed session; the failed message is not replayed automatically.`;
+	}
+	return `Cloud agent turn failed${code ? ` (${code})` : ""}: ${message}`;
 }
 
 function toThinkingLevel(effort: string): ThinkingLevel {

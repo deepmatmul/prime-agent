@@ -19,6 +19,8 @@ const snapshot = {
 	last_output: null,
 	last_error: null,
 	child_agent_ids: [],
+	archived_session_ids: ["session_old"],
+	session_generation: 2,
 };
 
 describe("CloudAgentClient", () => {
@@ -90,6 +92,10 @@ describe("CloudAgentClient", () => {
 		});
 		const address = await listen(server);
 		const client = new CloudAgentClient(`http://127.0.0.1:${address.port}`);
+		await expect(client.getAgent("fleet", "lead")).resolves.toMatchObject({
+			archivedSessionIds: ["session_old"],
+			sessionGeneration: 2,
+		});
 		const connection = await CloudAgentConnection.connect(client, {
 			fleetId: "fleet",
 			agentId: "lead",

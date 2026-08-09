@@ -14,6 +14,8 @@ export interface CloudAgentSnapshotDto {
 	lastOutput?: string;
 	lastError?: string;
 	childAgentIds: string[];
+	archivedSessionIds: string[];
+	sessionGeneration: number;
 }
 
 export interface CloudTranscriptDto {
@@ -220,6 +222,10 @@ function parseAgentSnapshot(value: unknown): CloudAgentSnapshotDto {
 		childAgentIds: Array.isArray(record.child_agent_ids)
 			? record.child_agent_ids.filter((item): item is string => typeof item === "string")
 			: [],
+		archivedSessionIds: Array.isArray(record.archived_session_ids)
+			? record.archived_session_ids.filter((item): item is string => typeof item === "string")
+			: [],
+		sessionGeneration: optionalNumber(record.session_generation) ?? 1,
 	};
 }
 

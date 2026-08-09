@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { formatCommandHelp, formatTopLevelHelp } from "../src/cli/command-registry.js";
-import { parseCloudCommandArgs } from "../src/cloud-command.js";
+import { cloudPortForwardArgs, parseCloudCommandArgs } from "../src/cloud-command.js";
 
 describe("cloud command", () => {
 	it("parses a durable Luna fleet launch", () => {
@@ -35,6 +35,25 @@ describe("cloud command", () => {
 	it("derives a stable fleet id from the working directory", () => {
 		const options = parseCloudCommandArgs([], "/tmp/My Project");
 		expect(options.fleetId).toBe("prime-my-project");
+	});
+
+	it("forwards to the Kubernetes Service port", () => {
+		expect(
+			cloudPortForwardArgs({
+				context: "dev-eks",
+				namespace: "cloud-agent-mvp",
+				service: "cloud-agent-api",
+				localPort: 18080,
+			}),
+		).toEqual([
+			"--context",
+			"dev-eks",
+			"--namespace",
+			"cloud-agent-mvp",
+			"port-forward",
+			"service/cloud-agent-api",
+			"18080:80",
+		]);
 	});
 
 	it("advertises cloud mode in public help", () => {
