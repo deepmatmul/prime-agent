@@ -528,6 +528,7 @@ export interface AgentConnectionExtensionUiRequest {
 }
 
 export type AgentConnectionRlmChildAgentStatus = "queued" | "running" | "done" | "error" | "cancelled";
+export type AgentConnectionChildExecutionKind = "rlm" | "managed-native" | "durable-fleet";
 
 export interface AgentConnectionRlmChildAgentActivity {
 	kind: "waiting" | "writing" | "executing";
@@ -536,6 +537,8 @@ export interface AgentConnectionRlmChildAgentActivity {
 
 export interface AgentConnectionRlmChildAgentSnapshot {
 	id: string;
+	/** Execution/lifecycle owner. Omitted by older local adapters and interpreted as `rlm`. */
+	executionKind?: AgentConnectionChildExecutionKind;
 	parentId?: string;
 	/** The child's own daemon active-session id, for attaching to it directly. */
 	activeSessionId?: string;

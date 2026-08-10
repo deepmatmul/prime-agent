@@ -369,7 +369,9 @@ export class CloudAgentConnection implements AgentConnection {
 	async getLastAssistantText(): Promise<string | undefined> {
 		for (let index = this.messages.length - 1; index >= 0; index--) {
 			const message = this.messages[index];
-			if (message.role === "assistant") return messageText(message.content);
+			if (message.role !== "assistant") continue;
+			const text = messageText(message.content);
+			if (text) return text;
 		}
 		return undefined;
 	}
@@ -382,12 +384,16 @@ export class CloudAgentConnection implements AgentConnection {
 		const labels: Record<string, string> = {
 			shell: "Remote shell",
 			command_execution: "Remote shell",
-			fleet_spawn_agent: "Spawn cloud agent",
-			fleet_send_message: "Send fleet message",
-			fleet_list_agents: "List fleet agents",
+			mcp_call: "MCP call",
+			"native.spawn_agent": "Spawn native subagent",
+			"native.send_input": "Message native subagent",
+			"native.wait": "Wait for native subagents",
+			"native.resume_agent": "Resume native subagent",
+			"native.close_agent": "Close native subagent",
+			"native.agent_message": "Native agent message",
 			web_search_call: "Web search",
 		};
-		const label = labels[name];
+		const label = name.startsWith("fleet.") ? `Fleet · ${name.slice("fleet.".length)}` : labels[name];
 		return label
 			? {
 					name,
@@ -460,7 +466,9 @@ export class CloudAgentConnection implements AgentConnection {
 	}
 
 	async cancelRlmChild(childId: string): Promise<boolean> {
-		await this.client.stopAgent(this.snapshot.fleetId, childId);
+		const child = this.childSnapshots.get(childId);
+		if (child?.executionKind === "managed-native") return false;
+		await this.client.stopAgent(this.snapshot.fleetId, child?.activeSessionId ?? childId);
 		return true;
 	}
 
@@ -617,8 +625,31 @@ export class CloudAgentConnection implements AgentConnection {
 		return this.unsupported("Deleting cloud sessions from the local catalog");
 	}
 
-	async watchSession(_activeSessionId: string): Promise<AgentConnectionSessionWatcher | undefined> {
-		return undefined;
+	async watchSession(activeSessionId: string): Promise<AgentConnectionSessionWatcher | undefined> {
+		const child = [...this.childSnapshots.values()].find(
+			(candidate) => candidate.activeSessionId === activeSessionId || candidate.id === activeSessionId,
+		);
+		if (child?.executionKind === "managed-native") return undefined;
+		let connection: CloudAgentConnection;
+		try {
+			connection = await CloudAgentConnection.connect(this.client, {
+				fleetId: this.snapshot.fleetId,
+				agentId: activeSessionId,
+				instructions: "attach to durable cloud agent",
+				model: child?.model ?? this.snapshot.model,
+				reasoningEffort: this.snapshot.reasoningEffort,
+				attachOnly: true,
+			});
+		} catch {
+			return undefined;
+		}
+		return {
+			getMessages: () => connection.getMessages(),
+			getCommands: () => connection.getCommands(),
+			subscribe: (listener) => connection.subscribe(listener),
+			getToolDefinition: (name) => connection.getToolDefinition(name),
+			close: () => connection.dispose(),
+		};
 	}
 
 	async dispose(): Promise<void> {
@@ -703,6 +734,12 @@ export class CloudAgentConnection implements AgentConnection {
 		}
 		this.liveAssistants.clear();
 		this.liveTools.clear();
+		for (const [id, child] of this.childSnapshots) {
+			if (child.executionKind === "managed-native") this.childSnapshots.delete(id);
+		}
+		for (const child of managedSubagentsFromItems(transcript.items)) {
+			this.childSnapshots.set(child.id, child);
+		}
 		this.turnActive = transcript.snapshot.status === "running";
 		await this.refreshChildren();
 		if (emitResync) this.emit({ type: "session_resynced", snapshot: this.connectionSnapshot() });
@@ -758,7 +795,10 @@ export class CloudAgentConnection implements AgentConnection {
 				break;
 			case "session.turn.item.added": {
 				const item = eventRecord(event.data, "item");
-				if (item) this.beginTool(item);
+				if (item) {
+					this.updateManagedSubagentFromItem(item);
+					this.beginTool(item);
+				}
 				break;
 			}
 			case "agent.output.command_execution_output.delta":
@@ -783,7 +823,47 @@ export class CloudAgentConnection implements AgentConnection {
 			case "session.environment.failed":
 				this.finishTurn("error", "Remote sandbox connection failed");
 				break;
+			case "session.subagent.created":
+			case "session.subagent.closed":
+				this.updateManagedSubagent(event.data, type === "session.subagent.closed");
+				break;
 		}
+	}
+
+	private updateManagedSubagent(data: Record<string, unknown>, closed: boolean): void {
+		const value = eventRecord(data, "subagent");
+		if (!value) return;
+		const id = eventString(value, "id");
+		if (!id) return;
+		const key = `managed-native:${id}`;
+		const previous = this.childSnapshots.get(key);
+		const openedAt = eventNumber(value, "opened_at");
+		const closedAt = eventNumber(value, "closed_at");
+		const child: AgentConnectionRlmChildAgentSnapshot = {
+			id: key,
+			executionKind: "managed-native",
+			activeSessionId: closed ? undefined : id,
+			label: previous?.label ?? nativeSubagentLabel(id),
+			model: previous?.model,
+			status: closed ? "done" : (previous?.status ?? "running"),
+			durationMs:
+				openedAt !== undefined && closedAt !== undefined ? Math.max(0, closedAt - openedAt) * 1_000 : undefined,
+			answerPreview: previous?.answerPreview,
+			recap: closed
+				? "native subagent closed"
+				: previous?.status === "done"
+					? "native subagent idle"
+					: "native subagent running",
+			sessionDir: "/workspace",
+			activity: closed || previous?.status === "done" ? undefined : { kind: "executing" },
+		};
+		this.childSnapshots.set(key, child);
+		this.emitSessionEvent({ type: "rlm_child_update", child });
+	}
+
+	private updateManagedSubagentFromItem(item: Record<string, unknown>): void {
+		const child = applyManagedSubagentItem(this.childSnapshots, item);
+		if (child) this.emitSessionEvent({ type: "rlm_child_update", child });
 	}
 
 	private beginTurn(): void {
@@ -964,7 +1044,16 @@ export class CloudAgentConnection implements AgentConnection {
 			compactionCount: 0,
 			goal: emptyGoalState(),
 			scopedModels: [{ model, thinkingLevel: toThinkingLevel(this.snapshot.reasoningEffort) }],
-			activeToolNames: ["shell", "fleet_spawn_agent", "fleet_send_message", "fleet_list_agents"],
+			activeToolNames: [
+				"shell",
+				"mcp_call",
+				"native.spawn_agent",
+				"native.send_input",
+				"native.wait",
+				"native.resume_agent",
+				"native.close_agent",
+				"native.agent_message",
+			],
 			contextUsage: { tokens: null, contextWindow: model.contextWindow, percent: null },
 			recap: cloudRecap(this.snapshot),
 		};
@@ -1090,7 +1179,8 @@ function itemContentText(item: Record<string, unknown>): string {
 	return content
 		.flatMap((part) => {
 			if (typeof part !== "object" || part === null || Array.isArray(part)) return [];
-			const text = eventString(part as Record<string, unknown>, "text");
+			const record = part as Record<string, unknown>;
+			const text = eventString(record, "text") ?? eventString(record, "encrypted_content");
 			return text ? [text] : [];
 		})
 		.join("");
@@ -1117,7 +1207,7 @@ function childSnapshot(snapshot: CloudAgentSnapshotDto): AgentConnectionRlmChild
 						: "running";
 	return {
 		id: snapshot.agentId,
-		parentId: snapshot.parentAgentId,
+		executionKind: "durable-fleet",
 		activeSessionId: snapshot.agentId,
 		sessionName: snapshot.agentId,
 		model: snapshot.model,
@@ -1131,6 +1221,82 @@ function childSnapshot(snapshot: CloudAgentSnapshotDto): AgentConnectionRlmChild
 	};
 }
 
+function managedSubagentsFromItems(items: readonly Record<string, unknown>[]): AgentConnectionRlmChildAgentSnapshot[] {
+	const snapshots = new Map<string, AgentConnectionRlmChildAgentSnapshot>();
+	for (const item of items) applyManagedSubagentItem(snapshots, item);
+	return [...snapshots.values()];
+}
+
+function applyManagedSubagentItem(
+	snapshots: Map<string, AgentConnectionRlmChildAgentSnapshot>,
+	item: Record<string, unknown>,
+): AgentConnectionRlmChildAgentSnapshot | undefined {
+	const itemType = eventString(item, "type");
+	if (itemType === "spawn_agent_call") {
+		const id = eventString(item, "spawned_agent_id");
+		if (!id) return undefined;
+		const key = `managed-native:${id}`;
+		const previous = snapshots.get(key);
+		const child: AgentConnectionRlmChildAgentSnapshot = {
+			id: key,
+			executionKind: "managed-native",
+			activeSessionId: id,
+			label: previous?.label ?? nativeSubagentLabel(id),
+			model: eventString(item, "model") ?? previous?.model,
+			status: "running",
+			answerPreview: previous?.answerPreview,
+			recap: "native subagent running",
+			sessionDir: "/workspace",
+			activity: { kind: "executing" },
+		};
+		snapshots.set(key, child);
+		return child;
+	}
+
+	if (itemType === "agent_message") {
+		const author = eventString(item, "author");
+		const recipient = eventString(item, "recipient");
+		const authorKey = author ? `managed-native:${author}` : undefined;
+		const recipientKey = recipient ? `managed-native:${recipient}` : undefined;
+		const previous = (authorKey && snapshots.get(authorKey)) || (recipientKey && snapshots.get(recipientKey));
+		if (!previous) return undefined;
+		const fromChild = authorKey === previous.id;
+		const child: AgentConnectionRlmChildAgentSnapshot = {
+			...previous,
+			status: fromChild ? "done" : "running",
+			answerPreview: fromChild ? itemContentText(item).slice(0, 240) : previous.answerPreview,
+			recap: fromChild ? "native subagent idle" : "native subagent running",
+			activity: fromChild ? undefined : { kind: "executing" },
+		};
+		snapshots.set(previous.id, child);
+		return child;
+	}
+
+	if (itemType === "send_input_call" || itemType === "resume_agent_call" || itemType === "close_agent_call") {
+		const id = eventString(item, "agent_id") ?? eventString(item, "target_agent_id");
+		if (!id) return undefined;
+		const key = `managed-native:${id}`;
+		const previous = snapshots.get(key);
+		if (!previous) return undefined;
+		const closed = itemType === "close_agent_call";
+		const child: AgentConnectionRlmChildAgentSnapshot = {
+			...previous,
+			activeSessionId: closed ? undefined : id,
+			status: closed ? "done" : "running",
+			recap: closed ? "native subagent closed" : "native subagent running",
+			activity: closed ? undefined : { kind: "executing" },
+		};
+		snapshots.set(key, child);
+		return child;
+	}
+
+	return undefined;
+}
+
+function nativeSubagentLabel(id: string): string {
+	return `native ${id.slice(-8)}`;
+}
+
 function cloudRecap(snapshot: CloudAgentSnapshotDto): string {
 	const location = snapshot.podName ? ` · ${snapshot.podName}` : "";
 	const pending = snapshot.pendingMessages > 0 ? ` · ${snapshot.pendingMessages} queued` : "";
@@ -1141,6 +1307,20 @@ function cloudRecap(snapshot: CloudAgentSnapshotDto): string {
 function toolName(itemType: string, item: Record<string, unknown>): string {
 	if (itemType === "function_call") return eventString(item, "name") ?? "function";
 	if (itemType === "command_execution") return "shell";
+	if (itemType === "mcp_call") {
+		const server = eventString(item, "server_label") ?? eventString(item, "server");
+		const name = eventString(item, "name") ?? eventString(item, "tool_name");
+		return server && name ? `${server}.${name}` : (name ?? "mcp_call");
+	}
+	const nativeNames: Record<string, string> = {
+		spawn_agent_call: "native.spawn_agent",
+		send_input_call: "native.send_input",
+		wait_for_agents_call: "native.wait",
+		resume_agent_call: "native.resume_agent",
+		close_agent_call: "native.close_agent",
+		agent_message: "native.agent_message",
+	};
+	if (nativeNames[itemType]) return nativeNames[itemType];
 	return itemType;
 }
 
@@ -1158,6 +1338,38 @@ function toolArguments(item: Record<string, unknown>): Record<string, unknown> {
 		} catch {
 			return { arguments: rawArguments };
 		}
+	}
+	const itemType = eventString(item, "type");
+	if (
+		itemType &&
+		[
+			"spawn_agent_call",
+			"send_input_call",
+			"wait_for_agents_call",
+			"resume_agent_call",
+			"close_agent_call",
+			"agent_message",
+		].includes(itemType)
+	) {
+		const fields = [
+			"spawned_agent_id",
+			"sender_agent_id",
+			"agent_id",
+			"target_agent_id",
+			"agent_ids",
+			"author",
+			"recipient",
+			"prompt",
+			"model",
+			"reasoning_effort",
+		] as const;
+		const projected: Record<string, unknown> = {};
+		for (const field of fields) {
+			if (item[field] !== undefined) projected[field] = item[field];
+		}
+		const message = itemContentText(item);
+		if (message) projected.message = message;
+		return projected;
 	}
 	const command = eventString(item, "command") ?? eventString(item, "cmd");
 	return command ? { command } : { item };
@@ -1181,6 +1393,11 @@ function eventRecord(record: Record<string, unknown>, key: string): Record<strin
 	return typeof value === "object" && value !== null && !Array.isArray(value)
 		? (value as Record<string, unknown>)
 		: undefined;
+}
+
+function eventNumber(record: Record<string, unknown>, key: string): number | undefined {
+	const value = record[key];
+	return typeof value === "number" && Number.isFinite(value) ? value : undefined;
 }
 
 function eventError(record: Record<string, unknown>): string {

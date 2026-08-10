@@ -3,6 +3,7 @@
 ## [Unreleased]
 
 - Added a `prime-agent cloud` UI mode that attaches the local TUI to durable managed-agent sessions, live event streams, EKS sandboxes, and recursive cloud fleets.
+- Changed cloud mode to distinguish durable fleet agents from managed-native subagents, restore native child state from persisted session items, and render fleet MCP and native coordination activity without application-specific function-tool labels.
 - Added privacy-safe pseudonymous product analytics for onboarding, command use, execution modes, run outcomes, TTFT, latency, usage, tools, retries, and compactions, with disclosure and opt-out controls ([ENG-4682](https://linear.app/primeintellect/issue/ENG-4682/add-privacy-safe-posthog-analytics-to-prime-agent)).
 - Changed sent agent messages in the IPython cell UI to show only the message text with a `╰─` gutter when expanded, matching received messages, and hid the raw `agent_message.send` receipt dictionary.
 - Fixed Homebrew installs attempting to self-update their versioned Cellar keg instead of directing users to `brew upgrade prime-agent` ([#844](https://github.com/PrimeIntellect-ai/prime-agent/issues/844))

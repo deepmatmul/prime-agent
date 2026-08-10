@@ -59,6 +59,21 @@ describe("CloudAgentClient", () => {
 								status: "completed",
 								content: [{ type: "input_text", text: "[cloud-agent-message-id:test]\nexisting" }],
 							},
+							{
+								id: "spawn_persisted",
+								type: "spawn_agent_call",
+								status: "completed",
+								spawned_agent_id: "subagent_persisted",
+								prompt: "Inspect the persisted state",
+								model: "gpt-5.6-luna",
+							},
+							{
+								id: "message_persisted",
+								type: "agent_message",
+								author: "subagent_persisted",
+								recipient: "agent_root",
+								content: [{ type: "encrypted_content", encrypted_content: "persisted answer" }],
+							},
 						],
 						truncated: false,
 					}),
@@ -73,6 +88,21 @@ describe("CloudAgentClient", () => {
 				response.write('event: cloud.connected\ndata: {"session_id":"session_test"}\n\n');
 				setTimeout(() => {
 					response.write('data: {"type":"session.turn.created","event_id":"evt_1"}\n\n');
+					response.write(
+						'data: {"type":"session.turn.item.added","item":{"id":"spawn_1","type":"spawn_agent_call","status":"in_progress","spawned_agent_id":"subagent_1","prompt":"research","model":"gpt-5.6-luna"}}\n\n',
+					);
+					response.write(
+						'data: {"type":"session.subagent.created","subagent":{"id":"subagent_1","name":"generated-name","status":"active","opened_at":100}}\n\n',
+					);
+					response.write(
+						'data: {"type":"session.turn.item.added","item":{"id":"native_message_1","type":"agent_message","author":"agent_root","recipient":"subagent_1","content":[{"type":"encrypted_content","encrypted_content":"research"}]}}\n\n',
+					);
+					response.write(
+						'data: {"type":"session.turn.item.added","item":{"id":"mcp_1","type":"mcp_call","server_label":"fleet","name":"list_agents","arguments":{}}}\n\n',
+					);
+					response.write(
+						'data: {"type":"session.turn.item.done","item":{"id":"mcp_1","type":"mcp_call","server_label":"fleet","name":"list_agents","status":"completed","output":{"agents":[]}}}\n\n',
+					);
 					response.write('data: {"type":"session.turn.output_text.added","item_id":"assistant_1"}\n\n');
 					response.write(
 						'data: {"type":"session.turn.output_text.delta","item_id":"assistant_1","delta":"hello"}\n\n',
@@ -82,6 +112,9 @@ describe("CloudAgentClient", () => {
 					);
 					response.write(
 						'data: {"type":"session.turn.item.done","item":{"id":"assistant_1","type":"message","role":"assistant","status":"completed","content":[{"type":"output_text","text":"hello"}]}}\n\n',
+					);
+					response.write(
+						'data: {"type":"session.turn.item.added","item":{"id":"native_message_2","type":"agent_message","author":"subagent_1","recipient":"agent_root","content":[{"type":"encrypted_content","encrypted_content":"native answer"}]}}\n\n',
 					);
 					response.write('data: {"type":"session.turn.completed","event_id":"evt_6"}\n\n');
 				}, 50);
@@ -109,11 +142,43 @@ describe("CloudAgentClient", () => {
 			if (event.type === "session_event") eventTypes.push(event.event.type);
 		});
 
-		await waitUntil(async () => (await connection.getLastAssistantText()) === "hello");
+		await waitUntil(async () => {
+			const initial = await connection.getInitialSnapshot();
+			return (
+				(await connection.getLastAssistantText()) === "hello" &&
+				(initial.children ?? []).some(
+					(child) =>
+						child.id === "managed-native:subagent_1" &&
+						child.status === "done" &&
+						child.answerPreview === "native answer",
+				)
+			);
+		});
 		expect((await connection.getMessages())[0]).toMatchObject({ role: "user", content: "existing" });
 		expect(await connection.getLastAssistantText()).toBe("hello");
 		expect(eventTypes).toContain("message_update");
+		expect(eventTypes).toContain("tool_execution_end");
 		expect(eventTypes).toContain("agent_end");
+		expect((await connection.getInitialSnapshot()).children).toContainEqual(
+			expect.objectContaining({
+				id: "managed-native:subagent_1",
+				executionKind: "managed-native",
+				status: "done",
+				activeSessionId: "subagent_1",
+				answerPreview: "native answer",
+			}),
+		);
+		expect((await connection.getInitialSnapshot()).children).toContainEqual(
+			expect.objectContaining({
+				id: "managed-native:subagent_persisted",
+				executionKind: "managed-native",
+				status: "done",
+				answerPreview: "persisted answer",
+			}),
+		);
+		expect(await connection.getToolDefinition("fleet.list_agents")).toMatchObject({
+			label: "Fleet · list_agents",
+		});
 		await connection.dispose();
 	});
 });

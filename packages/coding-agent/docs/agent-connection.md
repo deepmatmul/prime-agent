@@ -166,4 +166,10 @@ When changing the connection or wire surface, classify the change as backward-co
 
 The local boundary is suitable for another adapter, but it does not define a hosted control plane. A hosted system still needs explicit authentication, authorization, sandbox identity, artifact transfer, stable public DTOs, multi-client ownership, and network-level compatibility policy.
 
+A hosted adapter must also preserve child execution kind. A Prime RLM child is a retained `AgentSession`; a managed-native subagent is a bounded context inside one hosted managed session and shares its sandbox; a durable fleet agent owns a separate workflow, managed session, sandbox, and inbox. They may share presentation components, but they must not share identity, cancellation, attachment, or persistence semantics merely for UI convenience.
+
+Fleet discovery, bounded peer history, messaging, and durable admission belong behind an authenticated control-plane API or MCP adapter. They are not TUI-owned function callbacks. A persistent Prime kernel may wrap that MCP as a Python skill, while another hosted brain may consume it through its own programmatic tool surface.
+
+Managed-native lifecycle is projected from both live subagent events and persisted `spawn_agent_call` / `agent_message` items. A reply makes a resident native child idle; only an explicit close makes it inactive. This keeps reconnect from losing native children or leaving completed work falsely marked as running.
+
 The durable architectural rule is narrower and already enforced: the UI can be rich and client-specific, but it cannot own agent execution.
