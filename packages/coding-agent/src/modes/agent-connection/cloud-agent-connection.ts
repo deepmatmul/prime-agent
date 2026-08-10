@@ -126,13 +126,16 @@ export class CloudAgentConnection implements AgentConnection {
 			if (!(error instanceof CloudAgentHttpError) || error.status !== 404 || options.attachOnly) {
 				throw error;
 			}
-			await client.createAgent(options);
+			await client.createAgent({ ...options, executionBackend: "managed_agents" });
 			snapshot = await waitForSession(client, options.fleetId, options.agentId);
 		}
 		if (snapshot.status === "stopped" || snapshot.status === "stopping") {
 			throw new Error(
 				`Cloud agent ${options.fleetId}/${options.agentId} is ${snapshot.status}; choose a new fleet or agent id`,
 			);
+		}
+		if (snapshot.executionBackend !== "managed_agents") {
+			throw new Error("Prime-backed cloud agents must use the remote daemon connection");
 		}
 		if (!snapshot.sessionId) {
 			snapshot = await waitForSession(client, options.fleetId, options.agentId);

@@ -5,10 +5,15 @@ export interface CloudAgentSnapshotDto {
 	workflowId: string;
 	model: string;
 	reasoningEffort: string;
+	executionBackend: "prime" | "managed_agents";
 	parentAgentId?: string;
 	sessionId?: string;
 	environmentId?: string;
 	podName?: string;
+	podIp?: string;
+	runtimePort?: number;
+	activeSessionId?: string;
+	sessionFile?: string;
 	pendingMessages: number;
 	currentMessageId?: string;
 	lastOutput?: string;
@@ -40,6 +45,7 @@ export interface CloudAgentCreateOptions {
 	reasoningEffort: string;
 	textVerbosity?: "low" | "medium" | "high";
 	repoUrl?: string;
+	executionBackend?: "prime" | "managed_agents";
 }
 
 export interface CloudSseEvent {
@@ -92,6 +98,7 @@ export class CloudAgentClient {
 				reasoning_effort: options.reasoningEffort,
 				text_verbosity: options.textVerbosity ?? "low",
 				...(options.repoUrl ? { repo_url: options.repoUrl } : {}),
+				execution_backend: options.executionBackend ?? "prime",
 			}),
 		});
 		return parseAccepted(payload);
@@ -113,6 +120,14 @@ export class CloudAgentClient {
 		await this.request(`/v1/agents/${encodeURIComponent(fleetId)}/${encodeURIComponent(agentId)}/cancel`, {
 			method: "POST",
 			signal,
+		});
+	}
+
+	async recoverAgent(fleetId: string, agentId: string, signal?: AbortSignal): Promise<void> {
+		await this.request(`/v1/agents/${encodeURIComponent(fleetId)}/${encodeURIComponent(agentId)}/recover`, {
+			method: "POST",
+			signal,
+			body: JSON.stringify({ reason: "remote Prime transport disconnected" }),
 		});
 	}
 
@@ -211,10 +226,15 @@ function parseAgentSnapshot(value: unknown): CloudAgentSnapshotDto {
 		workflowId: requireString(record.workflow_id, "workflow_id"),
 		model: optionalString(record.model) ?? "gpt-5.6-sol",
 		reasoningEffort: optionalString(record.reasoning_effort) ?? "medium",
+		executionBackend: record.execution_backend === "prime" ? "prime" : "managed_agents",
 		parentAgentId: optionalString(record.parent_agent_id),
 		sessionId: optionalString(record.session_id),
 		environmentId: optionalString(record.environment_id),
 		podName: optionalString(record.pod_name),
+		podIp: optionalString(record.pod_ip),
+		runtimePort: optionalNumber(record.runtime_port),
+		activeSessionId: optionalString(record.active_session_id),
+		sessionFile: optionalString(record.session_file),
 		pendingMessages: optionalNumber(record.pending_messages) ?? 0,
 		currentMessageId: optionalString(record.current_message_id),
 		lastOutput: optionalString(record.last_output),

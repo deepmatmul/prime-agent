@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { formatCommandHelp, formatTopLevelHelp } from "../src/cli/command-registry.js";
-import { cloudPortForwardArgs, parseCloudCommandArgs } from "../src/cloud-command.js";
+import { cloudPodPortForwardArgs, cloudPortForwardArgs, parseCloudCommandArgs } from "../src/cloud-command.js";
 
 describe("cloud command", () => {
 	it("parses a durable Luna fleet launch", () => {
@@ -53,6 +53,26 @@ describe("cloud command", () => {
 			"port-forward",
 			"service/cloud-agent-api",
 			"18080:80",
+		]);
+	});
+
+	it("forwards the exact Prime daemon protocol from its EKS pod", () => {
+		expect(
+			cloudPodPortForwardArgs({
+				context: "dev-eks",
+				namespace: "cloud-agent-mvp",
+				pod: "agent-demo-lead",
+				localPort: 23456,
+				remotePort: 7447,
+			}),
+		).toEqual([
+			"--context",
+			"dev-eks",
+			"--namespace",
+			"cloud-agent-mvp",
+			"port-forward",
+			"pod/agent-demo-lead",
+			"23456:7447",
 		]);
 	});
 

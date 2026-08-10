@@ -2,6 +2,7 @@
 
 ## [Unreleased]
 
+- Changed `prime-agent cloud` to attach the stock TUI losslessly to a real Prime daemon hosted in each EKS sandbox, preserving persistent IPython state, native RLM subagents, session switching, daemon replay, and remote recovery while Temporal continues to own durable fleet peers and inboxes.
 - Added a `prime-agent cloud` UI mode that attaches the local TUI to durable managed-agent sessions, live event streams, EKS sandboxes, and recursive cloud fleets.
 - Changed cloud mode to distinguish durable fleet agents from managed-native subagents, restore generation-aware native child state from persisted session items, and render fleet MCP and native coordination activity without application-specific function-tool labels.
 - Added privacy-safe pseudonymous product analytics for onboarding, command use, execution modes, run outcomes, TTFT, latency, usage, tools, retries, and compactions, with disclosure and opt-out controls ([ENG-4682](https://linear.app/primeintellect/issue/ENG-4682/add-privacy-safe-posthog-analytics-to-prime-agent)).
