@@ -737,7 +737,10 @@ export class CloudAgentConnection implements AgentConnection {
 		for (const [id, child] of this.childSnapshots) {
 			if (child.executionKind === "managed-native") this.childSnapshots.delete(id);
 		}
-		for (const child of managedSubagentsFromItems(transcript.items)) {
+		for (const child of managedSubagentsFromItems(
+			transcript.items,
+			transcript.snapshot.sessionId ?? transcript.snapshot.workflowId,
+		)) {
 			this.childSnapshots.set(child.id, child);
 		}
 		this.turnActive = transcript.snapshot.status === "running";
@@ -835,7 +838,8 @@ export class CloudAgentConnection implements AgentConnection {
 		if (!value) return;
 		const id = eventString(value, "id");
 		if (!id) return;
-		const key = `managed-native:${id}`;
+		const managedSessionId = eventString(value, "session_id") ?? this.snapshot.sessionId ?? this.snapshot.workflowId;
+		const key = managedNativeKey(managedSessionId, id);
 		const previous = this.childSnapshots.get(key);
 		const openedAt = eventNumber(value, "opened_at");
 		const closedAt = eventNumber(value, "closed_at");
@@ -862,7 +866,11 @@ export class CloudAgentConnection implements AgentConnection {
 	}
 
 	private updateManagedSubagentFromItem(item: Record<string, unknown>): void {
-		const child = applyManagedSubagentItem(this.childSnapshots, item);
+		const child = applyManagedSubagentItem(
+			this.childSnapshots,
+			item,
+			this.snapshot.sessionId ?? this.snapshot.workflowId,
+		);
 		if (child) this.emitSessionEvent({ type: "rlm_child_update", child });
 	}
 
@@ -1221,33 +1229,38 @@ function childSnapshot(snapshot: CloudAgentSnapshotDto): AgentConnectionRlmChild
 	};
 }
 
-function managedSubagentsFromItems(items: readonly Record<string, unknown>[]): AgentConnectionRlmChildAgentSnapshot[] {
+function managedSubagentsFromItems(
+	items: readonly Record<string, unknown>[],
+	currentManagedSessionId: string,
+): AgentConnectionRlmChildAgentSnapshot[] {
 	const snapshots = new Map<string, AgentConnectionRlmChildAgentSnapshot>();
-	for (const item of items) applyManagedSubagentItem(snapshots, item);
+	for (const item of items) applyManagedSubagentItem(snapshots, item, currentManagedSessionId);
 	return [...snapshots.values()];
 }
 
 function applyManagedSubagentItem(
 	snapshots: Map<string, AgentConnectionRlmChildAgentSnapshot>,
 	item: Record<string, unknown>,
+	currentManagedSessionId: string,
 ): AgentConnectionRlmChildAgentSnapshot | undefined {
 	const itemType = eventString(item, "type");
+	const itemContext = managedItemContext(item, currentManagedSessionId);
 	if (itemType === "spawn_agent_call") {
 		const id = eventString(item, "spawned_agent_id");
 		if (!id) return undefined;
-		const key = `managed-native:${id}`;
+		const key = managedNativeKey(itemContext.sessionId, id);
 		const previous = snapshots.get(key);
 		const child: AgentConnectionRlmChildAgentSnapshot = {
 			id: key,
 			executionKind: "managed-native",
-			activeSessionId: id,
+			activeSessionId: itemContext.active ? id : undefined,
 			label: previous?.label ?? nativeSubagentLabel(id),
 			model: eventString(item, "model") ?? previous?.model,
-			status: "running",
+			status: itemContext.active ? "running" : "done",
 			answerPreview: previous?.answerPreview,
-			recap: "native subagent running",
+			recap: itemContext.active ? "native subagent running" : "native subagent historical",
 			sessionDir: "/workspace",
-			activity: { kind: "executing" },
+			activity: itemContext.active ? { kind: "executing" } : undefined,
 		};
 		snapshots.set(key, child);
 		return child;
@@ -1256,11 +1269,23 @@ function applyManagedSubagentItem(
 	if (itemType === "agent_message") {
 		const author = eventString(item, "author");
 		const recipient = eventString(item, "recipient");
-		const authorKey = author ? `managed-native:${author}` : undefined;
-		const recipientKey = recipient ? `managed-native:${recipient}` : undefined;
+		const authorKey = author ? managedNativeKey(itemContext.sessionId, author) : undefined;
+		const recipientKey = recipient ? managedNativeKey(itemContext.sessionId, recipient) : undefined;
 		const previous = (authorKey && snapshots.get(authorKey)) || (recipientKey && snapshots.get(recipientKey));
 		if (!previous) return undefined;
 		const fromChild = authorKey === previous.id;
+		if (!itemContext.active) {
+			const child: AgentConnectionRlmChildAgentSnapshot = {
+				...previous,
+				activeSessionId: undefined,
+				status: "done",
+				answerPreview: fromChild ? itemContentText(item).slice(0, 240) : previous.answerPreview,
+				recap: "native subagent historical",
+				activity: undefined,
+			};
+			snapshots.set(previous.id, child);
+			return child;
+		}
 		const child: AgentConnectionRlmChildAgentSnapshot = {
 			...previous,
 			status: fromChild ? "done" : "running",
@@ -1275,9 +1300,20 @@ function applyManagedSubagentItem(
 	if (itemType === "send_input_call" || itemType === "resume_agent_call" || itemType === "close_agent_call") {
 		const id = eventString(item, "agent_id") ?? eventString(item, "target_agent_id");
 		if (!id) return undefined;
-		const key = `managed-native:${id}`;
+		const key = managedNativeKey(itemContext.sessionId, id);
 		const previous = snapshots.get(key);
 		if (!previous) return undefined;
+		if (!itemContext.active) {
+			const child: AgentConnectionRlmChildAgentSnapshot = {
+				...previous,
+				activeSessionId: undefined,
+				status: "done",
+				recap: "native subagent historical",
+				activity: undefined,
+			};
+			snapshots.set(key, child);
+			return child;
+		}
 		const closed = itemType === "close_agent_call";
 		const child: AgentConnectionRlmChildAgentSnapshot = {
 			...previous,
@@ -1291,6 +1327,22 @@ function applyManagedSubagentItem(
 	}
 
 	return undefined;
+}
+
+function managedItemContext(
+	item: Record<string, unknown>,
+	currentManagedSessionId: string,
+): { sessionId: string; active: boolean } {
+	const cloud = eventRecord(item, "_cloud");
+	const sessionId = (cloud && eventString(cloud, "session_id")) ?? currentManagedSessionId;
+	return {
+		sessionId,
+		active: cloud?.active !== false && sessionId === currentManagedSessionId,
+	};
+}
+
+function managedNativeKey(managedSessionId: string, subagentId: string): string {
+	return `managed-native:${managedSessionId}:${subagentId}`;
 }
 
 function nativeSubagentLabel(id: string): string {

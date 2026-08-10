@@ -58,21 +58,24 @@ describe("CloudAgentClient", () => {
 								role: "user",
 								status: "completed",
 								content: [{ type: "input_text", text: "[cloud-agent-message-id:test]\nexisting" }],
+								_cloud: { session_id: "session_test", session_generation: 2, active: true },
 							},
 							{
 								id: "spawn_persisted",
 								type: "spawn_agent_call",
 								status: "completed",
-								spawned_agent_id: "subagent_persisted",
+								spawned_agent_id: "subagent_1",
 								prompt: "Inspect the persisted state",
 								model: "gpt-5.6-luna",
+								_cloud: { session_id: "session_old", session_generation: 1, active: false },
 							},
 							{
 								id: "message_persisted",
 								type: "agent_message",
-								author: "subagent_persisted",
+								author: "subagent_1",
 								recipient: "agent_root",
 								content: [{ type: "encrypted_content", encrypted_content: "persisted answer" }],
+								_cloud: { session_id: "session_old", session_generation: 1, active: false },
 							},
 						],
 						truncated: false,
@@ -92,7 +95,7 @@ describe("CloudAgentClient", () => {
 						'data: {"type":"session.turn.item.added","item":{"id":"spawn_1","type":"spawn_agent_call","status":"in_progress","spawned_agent_id":"subagent_1","prompt":"research","model":"gpt-5.6-luna"}}\n\n',
 					);
 					response.write(
-						'data: {"type":"session.subagent.created","subagent":{"id":"subagent_1","name":"generated-name","status":"active","opened_at":100}}\n\n',
+						'data: {"type":"session.subagent.created","subagent":{"id":"subagent_1","session_id":"session_test","name":"generated-name","status":"active","opened_at":100}}\n\n',
 					);
 					response.write(
 						'data: {"type":"session.turn.item.added","item":{"id":"native_message_1","type":"agent_message","author":"agent_root","recipient":"subagent_1","content":[{"type":"encrypted_content","encrypted_content":"research"}]}}\n\n',
@@ -148,7 +151,7 @@ describe("CloudAgentClient", () => {
 				(await connection.getLastAssistantText()) === "hello" &&
 				(initial.children ?? []).some(
 					(child) =>
-						child.id === "managed-native:subagent_1" &&
+						child.id === "managed-native:session_test:subagent_1" &&
 						child.status === "done" &&
 						child.answerPreview === "native answer",
 				)
@@ -161,7 +164,7 @@ describe("CloudAgentClient", () => {
 		expect(eventTypes).toContain("agent_end");
 		expect((await connection.getInitialSnapshot()).children).toContainEqual(
 			expect.objectContaining({
-				id: "managed-native:subagent_1",
+				id: "managed-native:session_test:subagent_1",
 				executionKind: "managed-native",
 				status: "done",
 				activeSessionId: "subagent_1",
@@ -170,10 +173,12 @@ describe("CloudAgentClient", () => {
 		);
 		expect((await connection.getInitialSnapshot()).children).toContainEqual(
 			expect.objectContaining({
-				id: "managed-native:subagent_persisted",
+				id: "managed-native:session_old:subagent_1",
 				executionKind: "managed-native",
 				status: "done",
+				activeSessionId: undefined,
 				answerPreview: "persisted answer",
+				recap: "native subagent historical",
 			}),
 		);
 		expect(await connection.getToolDefinition("fleet.list_agents")).toMatchObject({

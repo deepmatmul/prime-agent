@@ -170,6 +170,6 @@ A hosted adapter must also preserve child execution kind. A Prime RLM child is a
 
 Fleet discovery, bounded peer history, messaging, and durable admission belong behind an authenticated control-plane API or MCP adapter. They are not TUI-owned function callbacks. A persistent Prime kernel may wrap that MCP as a Python skill, while another hosted brain may consume it through its own programmatic tool surface.
 
-Managed-native lifecycle is projected from both live subagent events and persisted `spawn_agent_call` / `agent_message` items. A reply makes a resident native child idle; only an explicit close makes it inactive. This keeps reconnect from losing native children or leaving completed work falsely marked as running.
+Managed-native lifecycle is projected from both live subagent events and persisted `spawn_agent_call` / `agent_message` items. Its identity includes the owning managed-session ID. A reply from a child in the current generation makes that resident child idle; children found in archived managed-session generations are historical/inactive because recovery does not resurrect their hosted contexts. This keeps reconnect from losing native-child history or offering invalid lifecycle actions against it.
 
 The durable architectural rule is narrower and already enforced: the UI can be rich and client-specific, but it cannot own agent execution.
